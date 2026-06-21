@@ -1,0 +1,7 @@
+[
+  {
+    "desc": "Remove Kilo System Prompt",
+    "startsWith": "You are Kilo, ",
+    "endsWith": " when the work you just did has not been committed yet.\n"
+  }
+]
