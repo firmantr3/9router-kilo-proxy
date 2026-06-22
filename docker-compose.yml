@@ -1,0 +1,89 @@
+services:
+  9router:
+    image: ghcr.io/decolua/9router:latest
+    container_name: 9router
+    restart: unless-stopped
+    ports:
+      - "${ROUTER_PORT:-20128}:20128"
+    volumes:
+      - /home/firman/.9router:/app/data
+    environment:
+      - DATA_DIR=/app/data
+      - PORT=20128
+      - HOSTNAME=0.0.0.0
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+  headroom:
+    image: ghcr.io/chopratejas/headroom:latest
+    container_name: headroom
+    restart: unless-stopped
+    expose:
+      - "8787"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+  9router-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: 9router-webui
+    restart: unless-stopped
+    depends_on:
+      - 9router
+    ports:
+      - "${WEBUI_PORT:-20129}:8080"
+    volumes:
+      - /home/firman/.9router-webui:/app/backend/data
+    environment:
+      # Points straight at 9router's OpenAI-compatible endpoint, container-to-container
+      - OPENAI_API_BASE_URL=http://9router:20128/v1
+      # Put your real 9router dashboard API key here (Dashboard -> API Keys)
+      - OPENAI_API_KEY=${NINEROUTER_API_KEY:-changeme}
+      # No local Ollama models, so don't bother probing for them
+      - ENABLE_OLLAMA_API=false
+      # Skip the signup wall for a single-user local test UI; set true if you want accounts
+      - WEBUI_AUTH=false
+      - WEBUI_NAME=9router Tester
+      # Cuts the 10-15s "fetching models" delay on every page load
+      - ENABLE_BASE_MODELS_CACHE=true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+  omniroute:
+    image: diegosouzapw/omniroute:latest
+    container_name: omniroute
+    restart: unless-stopped
+    stop_grace_period: 40s
+    depends_on:
+      - qdrant
+    ports:
+      - "${OMNIROUTE_PORT:-20130}:20128"
+    volumes:
+      - omniroute-data:/app/data
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+  proxy:
+    image: ghcr.io/firmantr3/9router-proxy:latest
+    container_name: 9router-proxy
+    restart: unless-stopped
+    ports:
+      - "${PROXY_PORT:-20131}:20128"
+    volumes:
+      - /home/firman/.9router/strip.json:/app/strip.json:ro
+    environment:
+      - PORT=20128
+      - TARGET_URL=http://9router:20128
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+volumes:
+  omniroute-data:
+  qdrant-data:
