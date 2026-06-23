@@ -77,12 +77,18 @@ services:
     restart: unless-stopped
     ports:
       - "${PROXY_PORT:-20131}:20128"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - /home/firman/.9router/strip.json:/app/strip.json:ro
       - /home/firman/.9router/inject.json:/app/inject.json:ro
     environment:
       - PORT=20128
       - TARGET_URL=http://9router:20128
+      - VERBOSE_LOG=${VERBOSE_LOG:-false}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 volumes:

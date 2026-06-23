@@ -3,6 +3,7 @@ import { join } from "path";
 
 const PORT = Number(process.env.PORT) || 20128;
 const TARGET_URL = process.env.TARGET_URL || 'http://192.168.0.203:20128';
+const VERBOSE_LOG = process.env.VERBOSE_LOG === 'true';
 
 Bun.serve({
   port: PORT,
@@ -87,15 +88,17 @@ Bun.serve({
       bodyToForward = bodyText;
     }
 
-    console.log(`\n=== [${new Date().toISOString()}] ${req.method} ${url.pathname}${url.search} ===`);
-    if (bodyText) {
-      console.log("Request JSON:");
-      try {
-        const logParsed = JSON.parse(bodyText);
-        console.log(JSON.stringify(logParsed, null, 2));
-      } catch {
-        console.log("Raw Request Body:");
-        console.log(bodyText);
+    if (VERBOSE_LOG) {
+      console.log(`\n=== [${new Date().toISOString()}] ${req.method} ${url.pathname}${url.search} ===`);
+      if (bodyText) {
+        console.log("Request JSON:");
+        try {
+          const logParsed = JSON.parse(bodyText);
+          console.log(JSON.stringify(logParsed, null, 2));
+        } catch {
+          console.log("Raw Request Body:");
+          console.log(bodyText);
+        }
       }
     }
 
@@ -114,7 +117,11 @@ Bun.serve({
         redirect: 'manual',
       });
 
-      console.log(`Response Status: ${response.status}`);
+      if (VERBOSE_LOG) {
+        console.log(`Response Status: ${response.status}`);
+      } else {
+        console.log(`${new Date().toISOString()} ${req.method} ${url.pathname}${url.search} -> ${response.status}`);
+      }
       return response;
     } catch (error: any) {
       console.error("Proxy Error:", error);
