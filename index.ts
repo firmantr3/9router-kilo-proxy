@@ -16,17 +16,26 @@ Bun.serve({
     if (req.body) {
       bodyText = await req.text();
       
-      // Load stripping rules dynamically
+      // Load rules dynamically
       try {
+        let parsed: Record<string, unknown> | null = null;
+        let modified = false;
+
+        const getParsed = () => {
+          if (!parsed) {
+            parsed = JSON.parse(bodyText);
+          }
+          return parsed;
+        };
+
+        // Load stripping rules dynamically
         const stripRulesPath = join(import.meta.dir, "strip.json");
         const stripRulesFile = Bun.file(stripRulesPath);
         if (await stripRulesFile.exists()) {
           const rules = await stripRulesFile.json();
-          const parsed = JSON.parse(bodyText);
-          
-          if (parsed && Array.isArray(parsed.messages)) {
-            let modified = false;
-            for (const msg of parsed.messages) {
+          const p = getParsed();
+          if (p && Array.isArray(p.messages)) {
+            for (const msg of p.messages) {
               if (msg.role === "system" && typeof msg.content === "string") {
                 for (const rule of rules) {
                   const startIdx = msg.content.indexOf(rule.startsWith);
@@ -40,13 +49,39 @@ Bun.serve({
                 }
               }
             }
-            if (modified) {
-              bodyText = JSON.stringify(parsed);
+          }
+        }
+
+        // Load inject rules dynamically
+        const injectRulesPath = join(import.meta.dir, "inject.json");
+        const injectRulesFile = Bun.file(injectRulesPath);
+        if (await injectRulesFile.exists()) {
+          const injectRule = await injectRulesFile.json();
+          const p = getParsed();
+          if (p && Array.isArray(p.messages)) {
+            const firstUserMsg = p.messages.find((msg: any) => msg.role === "user");
+            if (firstUserMsg) {
+              const start = injectRule.start || "";
+              const end = injectRule.end || "";
+              if (typeof firstUserMsg.content === "string") {
+                firstUserMsg.content = start + firstUserMsg.content + end;
+                modified = true;
+              } else if (Array.isArray(firstUserMsg.content)) {
+                const firstTextPart = firstUserMsg.content.find((part: any) => part.type === "text");
+                if (firstTextPart && typeof firstTextPart.text === "string") {
+                  firstTextPart.text = start + firstTextPart.text + end;
+                  modified = true;
+                }
+              }
             }
           }
         }
+
+        if (modified) {
+          bodyText = JSON.stringify(parsed);
+        }
       } catch (err) {
-        console.error("Error processing strip rules:", err);
+        console.error("Error processing body rules:", err);
       }
 
       bodyToForward = bodyText;
@@ -54,10 +89,10 @@ Bun.serve({
 
     console.log(`\n=== [${new Date().toISOString()}] ${req.method} ${url.pathname}${url.search} ===`);
     if (bodyText) {
+      console.log("Request JSON:");
       try {
-        const parsed = JSON.parse(bodyText);
-        console.log("Request JSON:");
-        console.log(JSON.stringify(parsed, null, 2));
+        const logParsed = JSON.parse(bodyText);
+        console.log(JSON.stringify(logParsed, null, 2));
       } catch {
         console.log("Raw Request Body:");
         console.log(bodyText);
@@ -66,6 +101,10 @@ Bun.serve({
 
     const headers = new Headers(req.headers);
     headers.delete('host');
+    headers.delete('content-length');
+    headers.delete('x-forwarded-for');
+    headers.delete('x-forwarded-host');
+    headers.delete('x-real-ip');
 
     try {
       const response = await fetch(targetUrl.toString(), {
