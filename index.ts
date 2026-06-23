@@ -7,7 +7,8 @@ const VERBOSE_LOG = process.env.VERBOSE_LOG === 'true';
 
 Bun.serve({
   port: PORT,
-  async fetch(req) {
+  async fetch(req, server) {
+    server.timeout(req, 0);
     const url = new URL(req.url);
     const targetUrl = new URL(url.pathname + url.search, TARGET_URL);
 
@@ -108,6 +109,7 @@ Bun.serve({
     headers.delete('x-forwarded-for');
     headers.delete('x-forwarded-host');
     headers.delete('x-real-ip');
+    headers.delete('transfer-encoding');
 
     try {
       const response = await fetch(targetUrl.toString(), {
@@ -115,6 +117,7 @@ Bun.serve({
         headers,
         body: bodyToForward,
         redirect: 'manual',
+        signal: AbortSignal.any([req.signal, AbortSignal.timeout(120_000)]),
       });
 
       if (VERBOSE_LOG) {
@@ -124,6 +127,11 @@ Bun.serve({
       }
       return response;
     } catch (error: any) {
+      if (error.name === 'AbortError') {
+        const cause = error.cause?.name || 'unknown';
+        console.error(`[${new Date().toISOString()}] Upstream aborted (cause: ${cause})`);
+        return new Response('Upstream timeout or client disconnected', { status: 504 });
+      }
       console.error("Proxy Error:", error);
       return new Response(`Proxy Error: ${error.message}`, { status: 502 });
     }
