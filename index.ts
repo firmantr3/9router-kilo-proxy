@@ -2,8 +2,9 @@
 import { join } from "path";
 
 const PORT = Number(process.env.PORT) || 20128;
-const TARGET_URL = process.env.TARGET_URL || 'http://192.168.0.203:20128';
-const VERBOSE_LOG = process.env.VERBOSE_LOG === 'true';
+const TARGET_URL = process.env.TARGET_URL || "http://localhost:20128";
+const VERBOSE_LOG = process.env.VERBOSE_LOG === "true";
+const MAX_TIMEOUT = Number(process.env.MAX_TIMEOUT) * 1000 || 600_000;
 
 Bun.serve({
   port: PORT,
@@ -12,12 +13,12 @@ Bun.serve({
     const url = new URL(req.url);
     const targetUrl = new URL(url.pathname + url.search, TARGET_URL);
 
-    let bodyText = '';
+    let bodyText = "";
     let bodyToForward: BodyInit | null = null;
 
     if (req.body) {
       bodyText = await req.text();
-      
+
       // Load rules dynamically
       try {
         let parsed: Record<string, unknown> | null = null;
@@ -42,9 +43,14 @@ Bun.serve({
                 for (const rule of rules) {
                   const startIdx = msg.content.indexOf(rule.startsWith);
                   if (startIdx !== -1) {
-                    const endIdx = msg.content.indexOf(rule.endsWith, startIdx + rule.startsWith.length);
+                    const endIdx = msg.content.indexOf(
+                      rule.endsWith,
+                      startIdx + rule.startsWith.length,
+                    );
                     if (endIdx !== -1) {
-                      msg.content = msg.content.slice(0, startIdx) + msg.content.slice(endIdx + rule.endsWith.length);
+                      msg.content =
+                        msg.content.slice(0, startIdx) +
+                        msg.content.slice(endIdx + rule.endsWith.length);
                       modified = true;
                     }
                   }
@@ -61,7 +67,9 @@ Bun.serve({
           const injectRule = await injectRulesFile.json();
           const p = getParsed();
           if (p && Array.isArray(p.messages)) {
-            const firstUserMsg = p.messages.find((msg: any) => msg.role === "user");
+            const firstUserMsg = p.messages.find(
+              (msg: any) => msg.role === "user",
+            );
             if (firstUserMsg) {
               const start = injectRule.start || "";
               const end = injectRule.end || "";
@@ -69,7 +77,9 @@ Bun.serve({
                 firstUserMsg.content = start + firstUserMsg.content + end;
                 modified = true;
               } else if (Array.isArray(firstUserMsg.content)) {
-                const firstTextPart = firstUserMsg.content.find((part: any) => part.type === "text");
+                const firstTextPart = firstUserMsg.content.find(
+                  (part: any) => part.type === "text",
+                );
                 if (firstTextPart && typeof firstTextPart.text === "string") {
                   firstTextPart.text = start + firstTextPart.text + end;
                   modified = true;
@@ -90,7 +100,9 @@ Bun.serve({
     }
 
     if (VERBOSE_LOG) {
-      console.log(`\n=== [${new Date().toISOString()}] ${req.method} ${url.pathname}${url.search} ===`);
+      console.log(
+        `\n=== [${new Date().toISOString()}] ${req.method} ${url.pathname}${url.search} ===`,
+      );
       if (bodyText) {
         console.log("Request JSON:");
         try {
@@ -104,33 +116,39 @@ Bun.serve({
     }
 
     const headers = new Headers(req.headers);
-    headers.delete('host');
-    headers.delete('content-length');
-    headers.delete('x-forwarded-for');
-    headers.delete('x-forwarded-host');
-    headers.delete('x-real-ip');
-    headers.delete('transfer-encoding');
+    headers.delete("host");
+    headers.delete("content-length");
+    headers.delete("x-forwarded-for");
+    headers.delete("x-forwarded-host");
+    headers.delete("x-real-ip");
+    headers.delete("transfer-encoding");
 
     try {
       const response = await fetch(targetUrl.toString(), {
         method: req.method,
         headers,
         body: bodyToForward,
-        redirect: 'manual',
-        signal: AbortSignal.any([req.signal, AbortSignal.timeout(120_000)]),
+        redirect: "manual",
+        signal: AbortSignal.any([req.signal, AbortSignal.timeout(MAX_TIMEOUT)]),
       });
 
       if (VERBOSE_LOG) {
         console.log(`Response Status: ${response.status}`);
       } else {
-        console.log(`${new Date().toISOString()} ${req.method} ${url.pathname}${url.search} -> ${response.status}`);
+        console.log(
+          `${new Date().toISOString()} ${req.method} ${url.pathname}${url.search} -> ${response.status}`,
+        );
       }
       return response;
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        const cause = error.cause?.name || 'unknown';
-        console.error(`[${new Date().toISOString()}] Upstream aborted (cause: ${cause})`);
-        return new Response('Upstream timeout or client disconnected', { status: 504 });
+      if (error.name === "AbortError") {
+        const cause = error.cause?.name || "unknown";
+        console.error(
+          `[${new Date().toISOString()}] Upstream aborted (cause: ${cause})`,
+        );
+        return new Response("Upstream timeout or client disconnected", {
+          status: 504,
+        });
       }
       console.error("Proxy Error:", error);
       return new Response(`Proxy Error: ${error.message}`, { status: 502 });
@@ -138,5 +156,6 @@ Bun.serve({
   },
 });
 
-console.log(`Proxy serving on http://localhost:${PORT} -> proxying to ${TARGET_URL}`);
-
+console.log(
+  `Proxy serving on http://localhost:${PORT} -> proxying to ${TARGET_URL}`,
+);

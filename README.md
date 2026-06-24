@@ -109,7 +109,27 @@ Point your AI client at port `20131` to go through the proxy.
 | `code-audit` | Subagent — per-category audit (correctness, security, perf, etc.) |
 | `tdd-orchestrator` | Primary — TDD-first variant with improve + review loops |
 
-Copy `kilo/kilo.jsonc` to your project's `.kilo/kilo.jsonc` (or merge into your existing one).
+**Why a global `kilo.jsonc`?** It ships a ready-made code-orchestrator preset — the orchestrator/executor/reviewer/audit agent set above — so every project gets the same delegation workflow without re-defining agents each time.
+
+Install it as your user-level Kilo config (create the directory if missing):
+
+| OS | Path |
+| --- | --- |
+| macOS / Linux | `~/.config/kilo/kilo.jsonc` |
+| Windows | `%USERPROFILE%\.config\kilo\kilo.jsonc` |
+
+```bash
+# macOS / Linux
+mkdir -p ~/.config/kilo && cp kilo/kilo.jsonc ~/.config/kilo/kilo.jsonc
+```
+
+```powershell
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.config\kilo" | Out-Null
+Copy-Item kilo\kilo.jsonc "$env:USERPROFILE\.config\kilo\kilo.jsonc"
+```
+
+Or copy it to a single project's `.kilo/kilo.jsonc` instead (merge into an existing one if you have it).
 
 > **Required skills** — the agent prompts invoke `/caveman-review` and `/improve`. Install both before use:
 >
