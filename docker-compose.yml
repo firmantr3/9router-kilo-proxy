@@ -1,18 +1,21 @@
 services:
   9router:
-    image: ghcr.io/decolua/9router:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.9router
+      args:
+        NINEROUTER_VERSION: "${NINEROUTER_VERSION:-latest}"
     container_name: 9router
     restart: unless-stopped
     ports:
       - "${ROUTER_PORT:-20128}:20128"
     volumes:
       - /home/firman/.9router:/app/data
+    command: ["9router", "--no-browser", "--skip-update"]
     environment:
       - DATA_DIR=/app/data
       - PORT=20128
       - HOSTNAME=0.0.0.0
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
   headroom:
     image: ghcr.io/chopratejas/headroom:latest
     container_name: headroom

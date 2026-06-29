@@ -1,0 +1,15 @@
+FROM node:22-slim
+
+ARG NINEROUTER_VERSION=latest
+RUN npm install -g 9router@${NINEROUTER_VERSION} --omit=dev
+
+ENV PORT=20128 \
+    HOSTNAME=0.0.0.0 \
+    DATA_DIR=/app/data \
+    NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /app/data
+EXPOSE 20128
+
+CMD ["9router", "--no-browser", "--skip-update"]
