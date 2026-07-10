@@ -1,6 +1,6 @@
 ---
 description: Post-implementation code reviewer — checks diff for correctness, type safety, and walkthrough alignment.
-mode: subagent
+mode: all
 color: "#EF4444"
 permission:
   read: allow

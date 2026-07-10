@@ -1,6 +1,6 @@
 ---
 description: Code audit and improvement — finds dead code, over-engineering, convention drift, and applies ponytail-style simplifications. Also answers one-off architectural consults from `quick` or `planner`.
-mode: subagent
+mode: all
 color: "#A78BFA"
 permission:
   read: allow
