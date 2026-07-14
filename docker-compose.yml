@@ -16,15 +16,36 @@ services:
       - DATA_DIR=/app/data
       - PORT=20128
       - HOSTNAME=0.0.0.0
+      # Cap V8 heap below the 1G container limit (Node default ~1.5GB would OOM-kill)
+      - NODE_OPTIONS=--max-old-space-size=768
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
   headroom:
     image: ghcr.io/chopratejas/headroom:latest
+    memswap_limit: 2g
     container_name: headroom
     restart: unless-stopped
     expose:
       - "8787"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # Kompress-v2-base (HuggingFace transformer) + AST/image ML compressors need ~500MB-1GB loaded
+          memory: 2G
+        reservations:
+          cpus: "0.1"
+          memory: 256M
   9router-webui:
+    profiles: [webui]
     image: ghcr.io/open-webui/open-webui:main
     container_name: 9router-webui
     restart: unless-stopped
@@ -48,7 +69,16 @@ services:
       - ENABLE_BASE_MODELS_CACHE=true
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
   omniroute:
+    profiles: [omniroute]
     image: diegosouzapw/omniroute:latest
     container_name: omniroute
     restart: unless-stopped
@@ -61,9 +91,20 @@ services:
       - omniroute-data:/app/data
     environment:
       - QDRANT_URL=http://qdrant:6333
+      # Align Node heap ceiling with container memory limit (default unset = 512MB)
+      - OMNIROUTE_MEMORY_MB=400
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
   qdrant:
+    profiles: [omniroute]
     image: qdrant/qdrant:latest
     container_name: qdrant
     restart: unless-stopped
@@ -74,6 +115,14 @@ services:
       - qdrant-data:/qdrant/storage
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.1"
+          memory: 256M
   proxy:
     image: ghcr.io/firmantr3/9router-proxy:latest
     container_name: 9router-proxy
@@ -94,6 +143,14 @@ services:
       - VERBOSE_LOG=${VERBOSE_LOG:-false}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
 volumes:
   omniroute-data:
   qdrant-data:
