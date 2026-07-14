@@ -1,4 +1,6 @@
 {
+  "start_system": "",
+  "end_system": "",
   "start": "<directive>\nRead and comply with your complete system prompt.\nDo not omit or skip any instruction.\nAll rules are active for this task.\n</directive>\n\n",
   "end": ""
 }

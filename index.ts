@@ -52,6 +52,9 @@ Bun.serve({
                         msg.content.slice(0, startIdx) +
                         msg.content.slice(endIdx + rule.endsWith.length);
                       modified = true;
+                      if (VERBOSE_LOG) {
+                        console.log(`[strip] Applied rule: ${rule.desc || rule.startsWith}`);
+                      }
                     }
                   }
                 }
@@ -67,6 +70,22 @@ Bun.serve({
           const injectRule = await injectRulesFile.json();
           const p = getParsed();
           if (p && Array.isArray(p.messages)) {
+            // Inject into system messages (after strip)
+            const startSys = injectRule.start_system || "";
+            const endSys = injectRule.end_system || "";
+            if (startSys || endSys) {
+              for (const msg of p.messages) {
+                if (msg.role === "system" && typeof msg.content === "string") {
+                  msg.content = startSys + msg.content + endSys;
+                  modified = true;
+                  if (VERBOSE_LOG) {
+                    console.log(`[inject] Applied system injection`);
+                  }
+                }
+              }
+            }
+
+            // Inject into first user message
             const firstUserMsg = p.messages.find(
               (msg: any) => msg.role === "user",
             );
@@ -76,6 +95,9 @@ Bun.serve({
               if (typeof firstUserMsg.content === "string") {
                 firstUserMsg.content = start + firstUserMsg.content + end;
                 modified = true;
+                if (VERBOSE_LOG) {
+                  console.log(`[inject] Wrapped first user message`);
+                }
               } else if (Array.isArray(firstUserMsg.content)) {
                 const firstTextPart = firstUserMsg.content.find(
                   (part: any) => part.type === "text",
@@ -83,6 +105,9 @@ Bun.serve({
                 if (firstTextPart && typeof firstTextPart.text === "string") {
                   firstTextPart.text = start + firstTextPart.text + end;
                   modified = true;
+                  if (VERBOSE_LOG) {
+                    console.log(`[inject] Wrapped first user message (array content)`);
+                  }
                 }
               }
             }
