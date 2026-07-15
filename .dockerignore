@@ -7,3 +7,6 @@ node_modules/
 !.env.example
 .gitignore
 build.sh
+# Runtime config, mounted from host at /app/*.json — never baked into the image
+strip.json
+inject.json
