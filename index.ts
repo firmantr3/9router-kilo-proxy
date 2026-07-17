@@ -177,7 +177,8 @@ if (import.meta.main) {
       headers.delete("x-forwarded-host");
       headers.delete("x-real-ip");
       headers.delete("transfer-encoding");
-      headers.set("accept-encoding", "identity");
+      // ponytail: identity is avoided — some upstreams mishandle it.
+      // Fix is to strip Content-Encoding from response instead.
 
       try {
         const response = await fetch(targetUrl.toString(), {
@@ -195,7 +196,21 @@ if (import.meta.main) {
             `${new Date().toISOString()} ${req.method} ${url.pathname}${url.search} -> ${response.status}`,
           );
         }
-        return response;
+        const resHeaders = new Headers(response.headers);
+        // Strip Content-Encoding for codecs Bun auto-decompresses on fetch (gzip, deflate, br).
+        // Forwarding the stale header would trick client into double-inflate (ZlibError).
+        // Leave unknown encodings (e.g. zstd) intact — Bun doesn't inflate those.
+        const ce = resHeaders.get("content-encoding");
+        if (ce && /gzip|deflate|br|brotli/i.test(ce)) resHeaders.delete("content-encoding");
+        // Content-Length from upstream is compressed size; body is now decompressed.
+        // Transfer-Encoding is stale — new Response(body) sets its own framing.
+        resHeaders.delete("content-length");
+        resHeaders.delete("transfer-encoding");
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: resHeaders,
+        });
       } catch (error: unknown) {
         const e = error as { name?: string; cause?: { name?: string }; message?: string };
         if (e.name === "AbortError") {
