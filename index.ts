@@ -177,6 +177,7 @@ if (import.meta.main) {
       headers.delete("x-forwarded-host");
       headers.delete("x-real-ip");
       headers.delete("transfer-encoding");
+      headers.set("accept-encoding", "identity");
 
       try {
         const response = await fetch(targetUrl.toString(), {
