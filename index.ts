@@ -17,6 +17,7 @@ export type InjectRule = {
   end_system?: string;
   start?: string;
   end?: string;
+  only_when_string_exists?: string;
 };
 
 export type ChatMessage = {
@@ -67,8 +68,18 @@ export function applyStripRules(messages: ChatMessage[], rules: StripRule[]): bo
 }
 
 // Inject wrappers into system messages and the first user message. Mutates in place.
-export function applyInjectRules(messages: ChatMessage[], rule: InjectRule): boolean {
+// `onlyWhen` (pre-strip snapshot) gates injection: active only if that
+// string appears somewhere in the original body.
+export function applyInjectRules(
+  messages: ChatMessage[],
+  rule: InjectRule,
+  onlyWhen?: string,
+): boolean {
   let modified = false;
+
+  const preStrip = onlyWhen ?? "";
+  const gate = rule.only_when_string_exists ?? "";
+  if (gate && !preStrip.includes(gate)) return false;
 
   const startSys = rule.start_system ?? "";
   const endSys = rule.end_system ?? "";
@@ -129,9 +140,14 @@ export async function processBody(
   const stripRules = await loadStripRules(dir);
   const injectRule = await loadInjectRule(dir);
 
+  // ponytail: snapshot full body before strip so only_when_string_exists
+  // can gate on pre-strip content.
+  const preStripSnapshot = JSON.stringify(parsed);
+
   let modified = false;
   if (stripRules.length) modified = applyStripRules(messages, stripRules) || modified;
-  if (injectRule) modified = applyInjectRules(messages, injectRule) || modified;
+  if (injectRule)
+    modified = applyInjectRules(messages, injectRule, preStripSnapshot) || modified;
 
   return modified ? JSON.stringify(parsed) : null;
 }
@@ -262,6 +278,10 @@ async function printStartupStatus(): Promise<void> {
     if (userActive) {
       console.log(`    start: ${JSON.stringify(injectRule.start ?? "")}`);
       console.log(`    end:   ${JSON.stringify(injectRule.end ?? "")}`);
+    }
+    const gate = injectRule.only_when_string_exists;
+    if (gate) {
+      console.log(`  only_when_string_exists: ${JSON.stringify(gate)}`);
     }
   } else {
     console.log("Inject: INACTIVE (no inject.json)");

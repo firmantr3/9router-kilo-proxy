@@ -157,6 +157,45 @@ describe("applyInjectRules", () => {
     applyInjectRules(msgs, injectRule);
     expect(msgs[0].content).toBe("SYS[PRE  POST]SYS");
   });
+
+  it("injects when only_when_string_exists is present in pre-strip snapshot", () => {
+    const msgs: ChatMessage[] = [sys("S"), user("hello")];
+    const rule: InjectRule = { start: "<<", end: ">>", only_when_string_exists: "hello" };
+    const mod = applyInjectRules(msgs, rule, JSON.stringify({ messages: msgs }));
+    expect(mod).toBe(true);
+    expect(msgs[1].content).toBe("<<hello>>");
+  });
+
+  it("skips inject when only_when_string_exists absent from pre-strip snapshot", () => {
+    const msgs: ChatMessage[] = [sys("S"), user("hello")];
+    const rule: InjectRule = { start: "<<", end: ">>", only_when_string_exists: "You are Kilo" };
+    const mod = applyInjectRules(msgs, rule, JSON.stringify({ messages: msgs }));
+    expect(mod).toBe(false);
+    expect(msgs[1].content).toBe("hello");
+  });
+
+  it("gates on pre-strip content even after strip removed the string", () => {
+    const msgs: ChatMessage[] = [sys("PRE You are Kilo, secret END POST"), user("hi")];
+    const stripRules: StripRule[] = [{ startsWith: "You are Kilo,", endsWith: "END" }];
+    const injectRule: InjectRule = {
+      start: "<<",
+      end: ">>",
+      only_when_string_exists: "You are Kilo",
+    };
+    const snapshot = JSON.stringify({ messages: msgs });
+    applyStripRules(msgs, stripRules); // removes "You are Kilo" from system msg
+    const mod = applyInjectRules(msgs, injectRule, snapshot);
+    expect(mod).toBe(true); // gate saw it pre-strip
+    expect(msgs[1].content).toBe("<<hi>>");
+  });
+
+  it("inject still runs when gate absent and markers set", () => {
+    const msgs: ChatMessage[] = [user("hi")];
+    const rule: InjectRule = { start: "<<", end: ">>" };
+    const mod = applyInjectRules(msgs, rule, "irrelevant");
+    expect(mod).toBe(true);
+    expect(msgs[0].content).toBe("<<hi>>");
+  });
 });
 
 describe("loaders", () => {
@@ -208,6 +247,36 @@ describe("processBody", () => {
   it("returns null (no modification) when body already has no match but inject empty", async () => {
     const dir = await writeTempRules([{ startsWith: "NOPE,", endsWith: "X" }], {});
     const out = await processBody('{"messages":[{"role":"user","content":"hi"}]}', dir);
+    expect(out).toBeNull();
+  });
+
+  it("inject gated by only_when_string_exists via disk rules (present)", async () => {
+    const dir = await writeTempRules(
+      [{ startsWith: "You are Kilo,", endsWith: "END" }],
+      { start: "<<", end: ">>", only_when_string_exists: "You are Kilo" },
+    );
+    const body = JSON.stringify({
+      messages: [
+        { role: "system", content: "H You are Kilo, X END T" },
+        { role: "user", content: "hello" },
+      ],
+    });
+    const out = await processBody(body, dir);
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.messages[0].content).toBe("H  T");
+    expect(parsed.messages[1].content).toBe("<<hello>>");
+  });
+
+  it("inject skipped by only_when_string_exists via disk rules (absent)", async () => {
+    const dir = await writeTempRules(
+      [{ startsWith: "NOPE,", endsWith: "X" }],
+      { start: "<<", end: ">>", only_when_string_exists: "You are Kilo" },
+    );
+    const body = JSON.stringify({
+      messages: [{ role: "user", content: "hello" }],
+    });
+    const out = await processBody(body, dir);
     expect(out).toBeNull();
   });
 });
