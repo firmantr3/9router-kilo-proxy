@@ -20,6 +20,8 @@ export type InjectRule = {
   only_when_string_exists?: string;
 };
 
+export type InjectConfig = InjectRule | InjectRule[];
+
 export type ChatMessage = {
   role?: unknown;
   content?: unknown;
@@ -37,11 +39,12 @@ export async function loadStripRules(dir: string = import.meta.dir): Promise<Str
   return Array.isArray(rules) ? (rules as StripRule[]) : [];
 }
 
-export async function loadInjectRule(dir: string = import.meta.dir): Promise<InjectRule | null> {
+export async function loadInjectRule(dir: string = import.meta.dir): Promise<InjectConfig | null> {
   const file = Bun.file(join(dir, "inject.json"));
   if (!(await file.exists())) return null;
   const rule = await file.json();
-  return rule && typeof rule === "object" ? (rule as InjectRule) : null;
+  if (rule && typeof rule === "object") return rule as InjectConfig;
+  return null;
 }
 
 // Strip content between startsWith/endsWith in system messages. Mutates in place.
@@ -68,18 +71,17 @@ export function applyStripRules(messages: ChatMessage[], rules: StripRule[]): bo
 }
 
 // Inject wrappers into system messages and the first user message. Mutates in place.
-// `onlyWhen` (pre-strip snapshot) gates injection: active only if that
-// string appears somewhere in the original body.
-export function applyInjectRules(
+// Apply a single inject rule. `onlyWhen` (pre-strip snapshot) gates injection:
+// active only if that string appears somewhere in the original body.
+function applyOneInjectRule(
   messages: ChatMessage[],
   rule: InjectRule,
-  onlyWhen?: string,
+  onlyWhen: string,
 ): boolean {
   let modified = false;
 
-  const preStrip = onlyWhen ?? "";
   const gate = rule.only_when_string_exists ?? "";
-  if (gate && !preStrip.includes(gate)) return false;
+  if (gate && !onlyWhen.includes(gate)) return false;
 
   const startSys = rule.start_system ?? "";
   const endSys = rule.end_system ?? "";
@@ -118,6 +120,23 @@ export function applyInjectRules(
     }
   }
 
+  return modified;
+}
+
+// Apply one or many inject rules (array form supported). Mutates in place.
+export function applyInjectRules(
+  messages: ChatMessage[],
+  config: InjectConfig,
+  onlyWhen?: string,
+): boolean {
+  const rules = Array.isArray(config) ? config : [config];
+  const snapshot = onlyWhen ?? "";
+  let modified = false;
+  for (const rule of rules) {
+    if (rule && typeof rule === "object") {
+      modified = applyOneInjectRule(messages, rule, snapshot) || modified;
+    }
+  }
   return modified;
 }
 
@@ -266,23 +285,28 @@ async function printStartupStatus(): Promise<void> {
   }
 
   if (injectRule) {
-    const sysActive = Boolean(injectRule.start_system || injectRule.end_system);
-    const userActive = Boolean(injectRule.start || injectRule.end);
-    console.log("Inject: ACTIVE");
-    console.log(`  system: ${sysActive ? "ACTIVE" : "inactive"}`);
-    if (sysActive) {
-      console.log(`    start_system: ${JSON.stringify(injectRule.start_system ?? "")}`);
-      console.log(`    end_system:   ${JSON.stringify(injectRule.end_system ?? "")}`);
-    }
-    console.log(`  user:   ${userActive ? "ACTIVE" : "inactive"}`);
-    if (userActive) {
-      console.log(`    start: ${JSON.stringify(injectRule.start ?? "")}`);
-      console.log(`    end:   ${JSON.stringify(injectRule.end ?? "")}`);
-    }
-    const gate = injectRule.only_when_string_exists;
-    if (gate) {
-      console.log(`  only_when_string_exists: ${JSON.stringify(gate)}`);
-    }
+    const rules = Array.isArray(injectRule) ? injectRule : [injectRule];
+    console.log(`Inject: ACTIVE (${rules.length} rule${rules.length === 1 ? "" : "s"})`);
+    rules.forEach((rule, i) => {
+      const sysActive = Boolean(rule.start_system || rule.end_system);
+      const userActive = Boolean(rule.start || rule.end);
+      if (rules.length > 1) console.log(`  [${i}]`);
+      console.log(`    system: ${sysActive ? "ACTIVE" : "inactive"}`);
+      if (sysActive) {
+        console.log(`      start_system: ${JSON.stringify(rule.start_system ?? "")}`);
+        console.log(`      end_system:   ${JSON.stringify(rule.end_system ?? "")}`);
+      }
+      console.log(`    user:   ${userActive ? "ACTIVE" : "inactive"}`);
+      if (userActive) {
+        console.log(`      start: ${JSON.stringify(rule.start ?? "")}`);
+        console.log(`      end:   ${JSON.stringify(rule.end ?? "")}`);
+      }
+      if (rule.only_when_string_exists) {
+        console.log(
+          `    only_when_string_exists: ${JSON.stringify(rule.only_when_string_exists)}`,
+        );
+      }
+    });
   } else {
     console.log("Inject: INACTIVE (no inject.json)");
   }

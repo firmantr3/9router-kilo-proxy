@@ -8,6 +8,7 @@ import {
   type ChatMessage,
   type StripRule,
   type InjectRule,
+  type InjectConfig,
 } from "./index.ts";
 
 function sys(s: string): ChatMessage {
@@ -196,6 +197,46 @@ describe("applyInjectRules", () => {
     expect(mod).toBe(true);
     expect(msgs[0].content).toBe("<<hi>>");
   });
+
+  it("applies an array of inject rules in order", () => {
+    const msgs: ChatMessage[] = [sys("S"), user("hi")];
+    const config: InjectRule[] = [
+      { start_system: "[", end_system: "]" },
+      { start: "<<", end: ">>" },
+    ];
+    const mod = applyInjectRules(msgs, config, "hi");
+    expect(mod).toBe(true);
+    expect(msgs[0].content).toBe("[S]");
+    expect(msgs[1].content).toBe("<<hi>>");
+  });
+
+  it("array rules gate independently via only_when_string_exists", () => {
+    const msgs: ChatMessage[] = [sys("S"), user("hi")];
+    const config: InjectRule[] = [
+      { start: "YES[", end: "]YES", only_when_string_exists: "hi" },
+      { start: "NO[", end: "]NO", only_when_string_exists: "absent-string" },
+    ];
+    const mod = applyInjectRules(msgs, config, "hi");
+    expect(mod).toBe(true);
+    expect(msgs[1].content).toBe("YES[hi]YES");
+  });
+
+  it("returns false when all array rules gated out", () => {
+    const msgs: ChatMessage[] = [user("hi")];
+    const config: InjectRule[] = [
+      { start: "X", end: "Y", only_when_string_exists: "absent" },
+    ];
+    const mod = applyInjectRules(msgs, config, "hi");
+    expect(mod).toBe(false);
+    expect(msgs[0].content).toBe("hi");
+  });
+
+  it("empty array injects nothing", () => {
+    const msgs: ChatMessage[] = [user("hi")];
+    const mod = applyInjectRules(msgs, [], "hi");
+    expect(mod).toBe(false);
+    expect(msgs[0].content).toBe("hi");
+  });
 });
 
 describe("loaders", () => {
@@ -279,11 +320,28 @@ describe("processBody", () => {
     const out = await processBody(body, dir);
     expect(out).toBeNull();
   });
+
+  it("array form via disk rules: applies matched rule only", async () => {
+    const dir = await writeTempRules(
+      [{ startsWith: "NOPE,", endsWith: "X" }],
+      [
+        { start: "YES[", end: "]YES", only_when_string_exists: "hello" },
+        { start: "NO[", end: "]NO", only_when_string_exists: "nope" },
+      ],
+    );
+    const body = JSON.stringify({
+      messages: [{ role: "user", content: "hello" }],
+    });
+    const out = await processBody(body, dir);
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.messages[0].content).toBe("YES[hello]YES");
+  });
 });
 
 // Helpers for integration tests against real files on disk.
 const tempDirs: string[] = [];
-async function writeTempRules(strip: StripRule[], inject: InjectRule): Promise<string> {
+async function writeTempRules(strip: StripRule[], inject: InjectConfig): Promise<string> {
   const dir = `/tmp/9router-proxy-test-${tempDirs.length}-${Date.now()}`;
   tempDirs.push(dir);
   await Bun.write(joinPath(dir, "strip.json"), JSON.stringify(strip));
