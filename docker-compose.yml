@@ -28,7 +28,7 @@ services:
           memory: 256M
   headroom:
     image: ghcr.io/chopratejas/headroom:latest
-    memswap_limit: 2g
+    memswap_limit: 3g
     container_name: headroom
     restart: unless-stopped
     expose:
@@ -38,9 +38,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "4.0"
           # Kompress-v2-base (HuggingFace transformer) + AST/image ML compressors need ~500MB-1GB loaded
-          memory: 2G
+          memory: 3G
         reservations:
           cpus: "0.1"
           memory: 256M
@@ -137,6 +137,7 @@ services:
     volumes:
       - ${PROXY_CONFIG_DIR:-.}/strip.json:/app/strip.json:ro
       - ${PROXY_CONFIG_DIR:-.}/inject.json:/app/inject.json:ro
+      - ${PROXY_CONFIG_DIR:-.}/pools.json:/app/pools.json:ro
     environment:
       - PORT=20128
       - TARGET_URL=http://9router:20128

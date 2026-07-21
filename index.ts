@@ -1,4 +1,5 @@
 // ponytail: Using Bun.serve directly avoids any third-party framework/dependencies like Elysia or Express.
+import crypto from "node:crypto";
 import { join } from "path";
 
 const PORT = Number(process.env.PORT) || 20128;
@@ -31,6 +32,109 @@ type ContentPart = {
   type?: unknown;
   text?: unknown;
 };
+
+// --- Pool / sticky session state ---
+type PoolMap = Record<string, string[]>;
+const SESSION_TTL_MS = 45_000;
+const modelLoad = new Map<string, number>();
+const activeSessions = new Map<string, { model: string; pool: string; lastActive: number }>();
+
+async function loadPools(dir: string = import.meta.dir): Promise<PoolMap> {
+  try {
+    const f = Bun.file(join(dir, "pools.json"));
+    const j = await f.json();
+    return j && typeof j === "object" ? (j as PoolMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+function systemText(body: Record<string, unknown>): string {
+  if (Array.isArray(body.system)) {
+    return (body.system as Array<{ text?: string }>)
+      .map((p) => p?.text ?? "")
+      .join("\n");
+  }
+  const msgs = body.messages as Array<{ role?: string; content?: unknown }> | undefined;
+  const sys = msgs?.find((m) => m?.role === "system");
+  if (typeof sys?.content === "string") return sys.content;
+  if (Array.isArray(sys?.content))
+    return (sys.content as Array<{ text?: string }>).map((p) => p?.text ?? "").join("\n");
+  return "";
+}
+
+function firstUserText(body: Record<string, unknown>): string {
+  const msgs = body.messages as Array<{ role?: string; content?: unknown }> | undefined;
+  const u = msgs?.find((m) => m?.role === "user");
+  if (!u) return "";
+  if (typeof u.content === "string") return u.content;
+  if (Array.isArray(u.content))
+    return (u.content as Array<{ text?: string }>).map((p) => p?.text ?? "").join("\n");
+  return "";
+}
+
+function resolveSessionId(req: Request, body: Record<string, unknown>): string {
+  const hdr =
+    req.headers.get("x-subagent-id") ??
+    req.headers.get("x-agent-id") ??
+    req.headers.get("x-session-id");
+  if (hdr) return hdr;
+  const seed = systemText(body) + "\x00" + firstUserText(body);
+  if (seed.trim()) {
+    return crypto.createHash("sha256").update(seed).digest("hex").slice(0, 16);
+  }
+  return crypto.randomUUID();
+}
+
+function acquireModel(sessionId: string, requested: string, pools: PoolMap): string {
+  const existing = activeSessions.get(sessionId);
+  if (existing) {
+    existing.lastActive = Date.now();
+    console.log(`[pool] reuse ${existing.model} -> session ${sessionId}`);
+    return existing.model;
+  }
+  const pool = pools[requested];
+  if (!pool) {
+    console.log(`[pool] no pool for "${requested}" -> passthrough`);
+    return requested;
+  }
+  const idle = pool.find((m) => (modelLoad.get(m) ?? 0) === 0);
+  if (idle) {
+    modelLoad.set(idle, 1);
+    activeSessions.set(sessionId, { model: idle, pool: requested, lastActive: Date.now() });
+    console.log(`[pool] lock ${idle} -> session ${sessionId}`);
+    return idle;
+  }
+  // All busy — pick least-loaded
+  let best = pool[0];
+  let bestLoad = modelLoad.get(best) ?? 0;
+  for (let i = 1; i < pool.length; i++) {
+    const load = modelLoad.get(pool[i]) ?? 0;
+    if (load < bestLoad) { best = pool[i]; bestLoad = load; }
+  }
+  modelLoad.set(best, bestLoad + 1);
+  activeSessions.set(sessionId, { model: best, pool: requested, lastActive: Date.now() });
+  console.log(`[pool] all busy for "${requested}", least-loaded: ${best} (load ${bestLoad})`);
+  return best;
+}
+
+function releaseSession(sessionId: string, reason: string): void {
+  const s = activeSessions.get(sessionId);
+  if (!s) return;
+  const load = (modelLoad.get(s.model) ?? 1) - 1;
+  if (load <= 0) modelLoad.delete(s.model); else modelLoad.set(s.model, load);
+  activeSessions.delete(sessionId);
+  console.log(`[pool] release ${s.model} <- session ${sessionId} (${reason})`);
+}
+
+// ponytail: single-host only. Multi-instance needs external store (Redis).
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, s] of activeSessions) {
+    if (now - s.lastActive > SESSION_TTL_MS) releaseSession(id, "ttl");
+  }
+}, 5_000);
+// --- End pool / sticky session state ---
 
 export async function loadStripRules(dir: string = import.meta.dir): Promise<StripRule[]> {
   const file = Bun.file(join(dir, "strip.json"));
@@ -182,11 +286,47 @@ if (import.meta.main) {
       const targetUrl = new URL(url.pathname + url.search, TARGET_URL);
 
       let bodyToForward: string | null = null;
+      let sessionId: string | null = null;
 
       if (req.body) {
         const bodyText = await req.text();
+
+        // Resolve session from original body BEFORE strip/inject mutates it
+        if (bodyText.startsWith("{")) {
+          try {
+            const raw = JSON.parse(bodyText) as Record<string, unknown>;
+            if (raw?.model) {
+              const pools = await loadPools();
+              if (Object.keys(pools).length > 0) {
+                sessionId = resolveSessionId(req, raw);
+              }
+            }
+          } catch {
+            // not JSON — pass through
+          }
+        }
+
         const processed = await processBody(bodyText);
         bodyToForward = processed !== null ? processed : bodyText;
+      }
+
+      // --- Pool / sticky session rewrite ---
+      if (sessionId && bodyToForward && bodyToForward.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(bodyToForward) as Record<string, unknown>;
+          if (parsed?.model) {
+            const pools = await loadPools();
+            parsed.model = acquireModel(sessionId, parsed.model as string, pools);
+            bodyToForward = JSON.stringify(parsed);
+          }
+        } catch {
+          // not JSON or no model — pass through untouched
+        }
+      }
+      // --- End pool / sticky session rewrite ---
+
+      if (sessionId) {
+        req.signal.addEventListener("abort", () => releaseSession(sessionId!, "disconnect"), { once: true });
       }
 
       if (VERBOSE_LOG) {
@@ -241,12 +381,40 @@ if (import.meta.main) {
         // Transfer-Encoding is stale — new Response(body) sets its own framing.
         resHeaders.delete("content-length");
         resHeaders.delete("transfer-encoding");
+        // --- Stream wrap for pool release on abnormal termination only ---
+        if (sessionId && response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          const tail: string[] = [];
+          const wrapped = new ReadableStream({
+            async pull(controller) {
+              const { value, done } = await reader.read();
+              if (done) {
+                // Normal completion — session stays sticky until TTL or next abnormal event
+                controller.close();
+                return;
+              }
+              tail.push(decoder.decode(value, { stream: true }));
+              if (tail.length > 8) tail.shift();
+              controller.enqueue(value);
+            },
+            cancel() {
+              releaseSession(sessionId!, "client-cancel");
+            },
+          });
+          return new Response(wrapped, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: resHeaders,
+          });
+        }
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
           headers: resHeaders,
         });
       } catch (error: unknown) {
+        if (sessionId) releaseSession(sessionId, "error");
         const e = error as { name?: string; cause?: { name?: string }; message?: string };
         if (e.name === "AbortError") {
           const cause = e.cause?.name || "unknown";
@@ -310,5 +478,16 @@ async function printStartupStatus(): Promise<void> {
   } else {
     console.log("Inject: INACTIVE (no inject.json)");
   }
+
+  const pools = await loadPools();
+  if (Object.keys(pools).length) {
+    console.log(`Pools: ACTIVE (${Object.keys(pools).length})`);
+    for (const [alias, models] of Object.entries(pools)) {
+      console.log(`  ${alias}: ${models.join(", ")}`);
+    }
+  } else {
+    console.log("Pools: INACTIVE (no pools.json)");
+  }
+
   console.log("==================================");
 }

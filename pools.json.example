@@ -1,0 +1,15 @@
+{
+  "proxy-coder": [
+    "ag/gemini-3-flash",
+    "oc/deepseek-v4-flash-free",
+    "kc/kilo-auto/free",
+    "oc/mimo-2.5-free"
+  ],
+  "proxy-planner": ["cc/claude-opus-4-8", "glm-5.2"],
+  "proxy-reviewer": ["cc/claude-sonnet-5", "fmd/gpt-5.5"],
+  "proxy-explorer": [
+    "gc/gemini-2.5-pro",
+    "gemini/gemini-2.5-pro",
+    "ds/deepseek-chat"
+  ]
+}
