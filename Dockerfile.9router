@@ -1,7 +1,7 @@
-FROM node:22-slim
+FROM node:24-slim
 
 ARG NINEROUTER_VERSION=latest
-RUN npm install -g 9router@${NINEROUTER_VERSION} --omit=dev
+RUN npm install -g 9router@${NINEROUTER_VERSION} --omit=dev --ignore-scripts --no-update-notifier
 
 ENV PORT=20128 \
     HOSTNAME=0.0.0.0 \
